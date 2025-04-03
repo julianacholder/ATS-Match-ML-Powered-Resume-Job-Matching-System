@@ -11,7 +11,15 @@ from src.preprocessing import preprocess_data, vectorize_data, save_to_database,
 from src.model import evaluate_model, save_model
 from src.prediction import predict_single
 
-app = FastAPI()
+app = FastAPI(
+    title="ATS Match API",
+    description="Machine Learning API for matching resumes to job descriptions",
+    version="1.0",
+    openapi_tags=[{
+        "name": "predictions",
+        "description": "Resume-job matching operations"
+    }]
+)
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -28,19 +36,67 @@ model = load_model(MODEL_PATH)
 vectorizer = joblib.load(VECTORIZER_PATH)
 retraining_in_progress = False
 
+# Sample data for testing
+SAMPLE_RESUME = """
+John Doe
+Software Engineer
+Skills: Python, FastAPI, TensorFlow, Machine Learning
+Experience: 5 years at Tech Corp
+Education: BS in Computer Science
+"""
+
+SAMPLE_JOB_DESC = """
+Looking for a Machine Learning Engineer with:
+- 3+ years Python experience
+- Knowledge of TensorFlow/Keras
+- API development skills
+Competitive salary offered.
+"""
+@app.get("/", include_in_schema=False)
+async def api_overview():
+    """Returns overview of all API endpoints"""
+    return {
+        "message": "ATS Match API",
+        "endpoints": {
+            "GET /status": "Check API status",
+            "POST /api/predict": "Predict match with text inputs (uses samples if empty)",
+            "POST /api/predict_resume_file": "Predict match with resume file",
+            "POST /api/upload": "Upload CSV dataset",
+            "GET /api/retrain_status": "Check retraining status",
+            "POST /api/retrain": "Trigger model retraining"
+        },
+        "try_it": "Visit /docs for interactive testing"
+    }
+
 @app.get("/status")
 async def status():
     return {"status": "ready" if model and vectorizer else "not_ready"}
 
 @app.post("/api/predict")
-async def predict(resume_text: str = Form(...), job_text: str = Form(...)):
+async def predict(
+    resume_text: str = Form(default=SAMPLE_RESUME),
+    job_text: str = Form(default=SAMPLE_JOB_DESC)
+):
+    """
+    Predict resume-job match probability
+    
+    Parameters:
+    - resume_text: Resume content (default: sample resume)
+    - job_text: Job description (default: sample job)
+    
+    Returns:
+    - prediction: 1 (Relevant) or 0 (Not Relevant)
+    - probability: Match confidence (0-1)
+    """
     if not resume_text or not job_text:
         return JSONResponse(content={'error': 'Missing input text'}, status_code=400)
+    
     prediction, probability = predict_single(resume_text, job_text, model, vectorizer)
     return {
         'prediction': int(prediction),
         'prediction_label': 'Relevant' if prediction == 1 else 'Not Relevant',
-        'probability': float(probability)
+        'probability': float(probability),
+        'note': 'Using sample data if no input provided'
     }
 
 @app.post("/api/predict_resume_file")
