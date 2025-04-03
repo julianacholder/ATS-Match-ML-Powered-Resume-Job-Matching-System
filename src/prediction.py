@@ -25,26 +25,32 @@ def preprocess_input(resume_text, job_text, vectorizer):
 
 def predict_single(resume_text, job_text, model, vectorizer):
     """
-    Make a prediction for a single resume-job pair
-    
-    Args:
-        resume_text: Text of the resume
-        job_text: Text of the job description
-        model: Trained model
-        vectorizer: Fitted TF-IDF vectorizer
-        
-    Returns:
-        prediction: 1 (relevant) or 0 (not relevant)
-        probability: Confidence score
+    Make a prediction for a single resume-job pair, with skill analysis
     """
-    # Preprocess the input
     features = preprocess_input(resume_text, job_text, vectorizer)
-    
-    # Make prediction
     probability = model.predict(features)[0][0]
     prediction = 1 if probability >= 0.5 else 0
-    
-    return prediction, probability
+
+    skills_info = analyze_skills(resume_text, job_text)
+
+    return prediction, probability, skills_info
+
+
+def extract_skills(text):
+    return set(word.lower() for word in text.split() if len(word) > 2)
+
+def analyze_skills(resume_text, job_text):
+    resume_skills = extract_skills(resume_text)
+    job_skills = extract_skills(job_text)
+
+    matching = list(resume_skills.intersection(job_skills))
+    missing = list(job_skills - resume_skills)
+
+    return {
+        "matching_skills": matching,
+        "missing_skills": missing
+    }
+
 
 def predict_batch(resume_texts, job_texts, model, vectorizer):
     """

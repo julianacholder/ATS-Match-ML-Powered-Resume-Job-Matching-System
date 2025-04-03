@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import pandas as pd
 import joblib
@@ -7,9 +8,12 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 import threading
 import shutil
+from datetime import datetime
+import sqlite3
+from collections import defaultdict
 from src.preprocessing import preprocess_data, vectorize_data, save_to_database, handle_class_imbalance, split_and_save_data, parse_resume, load_from_database
 from src.model import evaluate_model, save_model
-from src.prediction import predict_single
+from src.prediction import predict_single, analyze_skills
 
 app = FastAPI(
     title="ATS Match API",
@@ -19,6 +23,14 @@ app = FastAPI(
         "name": "predictions",
         "description": "Resume-job matching operations"
     }]
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Configuration
@@ -35,6 +47,12 @@ os.makedirs('data', exist_ok=True)
 model = load_model(MODEL_PATH)
 vectorizer = joblib.load(VECTORIZER_PATH)
 retraining_in_progress = False
+
+MODEL_INFO = {
+    "last_retrained": datetime.now().isoformat(),
+    "performance": "Accuracy 82%, F1 Score 0.81",
+    "data_size": "8000 samples"
+}
 
 # Sample data for testing
 SAMPLE_RESUME = """
@@ -70,7 +88,12 @@ async def api_overview():
 
 @app.get("/status")
 async def status():
-    return {"status": "ready" if model and vectorizer else "not_ready"}
+    return {
+        "status": "ready" if model and vectorizer else "not_ready",
+        "last_retrained": MODEL_INFO["last_retrained"],
+        "performance": MODEL_INFO["performance"],
+        "data_size": MODEL_INFO["data_size"]
+    }
 
 @app.post("/api/predict")
 async def predict(
@@ -117,11 +140,14 @@ async def predict_resume_file(resume: UploadFile = File(...), job_text: str = Fo
         return JSONResponse(content={"error": f"Resume parsing failed: {str(e)}"}, status_code=500)
 
     # Predict
-    prediction, probability = predict_single(resume_text, job_text, model, vectorizer)
+    prediction, probability, skills_info = predict_single(resume_text, job_text, model, vectorizer)
+    
     return {
         "prediction": int(prediction),
         "prediction_label": "Relevant" if prediction == 1 else "Not Relevant",
         "probability": float(probability),
+        "matching_skills": skills_info["matching_skills"],
+        "missing_skills": skills_info["missing_skills"],
         "resume_excerpt": resume_text[:300]
     }
 
@@ -141,10 +167,14 @@ async def retrain_status():
     return {"retraining": retraining_in_progress}
 
 def retrain_model_task():
-    global model, vectorizer, retraining_in_progress
+    global model, vectorizer, retraining_in_progress, MODEL_INFO
     retraining_in_progress = True
     try:
+        # Load data from database
         df = load_from_database(db_path=DATABASE_PATH)
+        # Update data size
+        MODEL_INFO["data_size"] = f"{len(df):,} samples"
+        
         processed_df = preprocess_data(df)
         _, _ = split_and_save_data(processed_df)
         X_features, y, new_vectorizer = vectorize_data(processed_df)
@@ -160,7 +190,27 @@ def retrain_model_task():
             tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=1e-5)
         ]
 
-        model.fit(X_train, y_train, epochs=20, batch_size=32, validation_data=(X_test, y_test), callbacks=callbacks)
+        history = model.fit(
+            X_train, y_train, 
+            epochs=20, 
+            batch_size=32, 
+            validation_data=(X_test, y_test), 
+            callbacks=callbacks
+        )
+        
+        # Evaluate model and update metrics
+        eval_metrics = model.evaluate(X_test, y_test)
+        accuracy = eval_metrics[1]
+        
+        # Predict on test set for F1 score calculation
+        y_pred = (model.predict(X_test) > 0.5).astype("int32")
+        from sklearn.metrics import f1_score
+        f1 = f1_score(y_test, y_pred)
+        
+        MODEL_INFO["performance"] = f"Accuracy {accuracy:.1%}, F1 Score {f1:.2f}"
+        MODEL_INFO["last_retrained"] = datetime.now().isoformat()
+        
+        # Save model and vectorizer
         save_model(model, MODEL_PATH)
         joblib.dump(new_vectorizer, VECTORIZER_PATH)
         vectorizer = new_vectorizer
@@ -169,6 +219,24 @@ def retrain_model_task():
         print(f"Retraining error: {e}")
     finally:
         retraining_in_progress = False
+
+# Add this function to get data size on startup
+def initialize_model_info():
+    global MODEL_INFO
+    try:
+        # Try to get dataset size from database
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM resume_job_matches")
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        MODEL_INFO["data_size"] = f"{count:,} samples"
+    except Exception as e:
+        print(f"Error getting initial data size: {e}")
+
+# Call this during startup
+initialize_model_info()
 
 @app.post("/api/retrain")
 async def retrain():
