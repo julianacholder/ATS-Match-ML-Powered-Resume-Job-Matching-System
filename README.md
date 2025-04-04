@@ -10,7 +10,7 @@
 
 - ** Live Demo** – https://ats-frontend-delta.vercel.app 
 - ** API Docs** – https://ats-match-ml-powered-resume-job-production.up.railway.app/docs 
-- ** Video Demo** – Complete walkthrough of features and deployment
+- ** Video Demo** – https://www.loom.com/share/c60a331a653d412ab4c43ae703def294?sid=4674c423-efa6-4b6a-9bed-1857c0dffb77
 - ** Frontend Repo ** – https://github.com/julianacholder/ats_frontend
 
 ---
