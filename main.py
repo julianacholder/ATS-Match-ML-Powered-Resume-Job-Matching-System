@@ -173,25 +173,62 @@ def retrain_model_task():
     try:
         # Load data from database
         df = load_from_database(db_path=DATABASE_PATH)
+        
+        # Check if we have enough data
+        if len(df) < 10:  # Set a minimum threshold
+            raise ValueError(f"Not enough training data. Found only {len(df)} samples, need at least 10.")
+        
         # Update data size
         MODEL_INFO["data_size"] = f"{len(df):,} samples"
         
         processed_df = preprocess_data(df)
         _, _ = split_and_save_data(processed_df)
+        
+        # Create new vectorizer and transform data
         X_features, y, new_vectorizer = vectorize_data(processed_df)
+        
+        # Check class distribution
+        class_counts = {c: sum(y == c) for c in set(y)}
+        print(f"Class distribution before balancing: {class_counts}")
+        
+        if len(class_counts) < 2:
+            raise ValueError(f"Only one class found in the data: {class_counts}. Need both positive and negative examples.")
+        
+        # Handle class imbalance
         X_balanced, y_balanced = handle_class_imbalance(X_features, y, method='smote')
+        
+        # Split data
         from sklearn.model_selection import train_test_split
         X_train, X_test, y_train, y_test = train_test_split(X_balanced, y_balanced, test_size=0.2, random_state=42)
-
-        model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=0.001, momentum=0.9),
-                      loss='binary_crossentropy', metrics=['accuracy'])
-
+        
+        # Get input shape for new model
+        input_shape = X_train.shape[1]
+        print(f"Building new model with input shape: {input_shape}")
+        
+        # Create a new model with the current input shape
+        new_model = tf.keras.Sequential([
+            tf.keras.layers.Dense(128, activation='relu', input_shape=(input_shape,)),
+            tf.keras.layers.Dropout(0.3),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dropout(0.3),
+            tf.keras.layers.Dense(1, activation='sigmoid')
+        ])
+        
+        # Compile the new model
+        new_model.compile(
+            optimizer=tf.keras.optimizers.SGD(learning_rate=0.001, momentum=0.9),
+            loss='binary_crossentropy', 
+            metrics=['accuracy']
+        )
+        
+        # Set up callbacks
         callbacks = [
             tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
             tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=3, min_lr=1e-5)
         ]
-
-        history = model.fit(
+        
+        # Train the new model
+        history = new_model.fit(
             X_train, y_train, 
             epochs=20, 
             batch_size=32, 
@@ -199,17 +236,18 @@ def retrain_model_task():
             callbacks=callbacks
         )
         
-         # Evaluate model and update metrics
-        eval_metrics = model.evaluate(X_test, y_test)
+        # Evaluate the new model
+        eval_metrics = new_model.evaluate(X_test, y_test)
         loss = eval_metrics[0]
         accuracy = eval_metrics[1]
         
-        # Predict on test set for additional metrics
-        y_pred = (model.predict(X_test) > 0.5).astype("int32")
+        # Get additional metrics
+        y_pred = (new_model.predict(X_test) > 0.5).astype("int32")
         from sklearn.metrics import f1_score, recall_score
         f1 = f1_score(y_test, y_pred)
         recall = recall_score(y_test, y_pred)
-
+        
+        # Update model info
         MODEL_INFO["performance"] = f"Accuracy {accuracy:.1%}, F1 Score {f1:.2f}"
         MODEL_INFO["last_retrained"] = datetime.now().isoformat()
         MODEL_INFO["metrics"] = {
@@ -219,18 +257,23 @@ def retrain_model_task():
             "f1": float(f1)
         }
         
-        # Save model and vectorizer
+        # Replace the old model and vectorizer with the new ones
+        model = new_model
+        vectorizer = new_vectorizer
+        
+        # Save the new model and vectorizer
         save_model(model, MODEL_PATH)
         joblib.dump(new_vectorizer, VECTORIZER_PATH)
-        vectorizer = new_vectorizer
-
+        
+        print("Model retrained and saved successfully!")
+        
     except Exception as e:
         print(f"Retraining error: {e}")
+        import traceback
+        traceback.print_exc()  # Print full error details
     finally:
         retraining_in_progress = False
 
-
-# Add this to the initialize_model_info() function in your FastAPI app (paste.txt)
 
 def initialize_model_info():
     global MODEL_INFO
