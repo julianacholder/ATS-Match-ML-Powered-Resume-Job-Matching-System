@@ -8,8 +8,8 @@
 
 ##  Quick Links
 
-- ** Live Demo** – Frontend hosted on Vercel  
-- ** API Docs** – [FastAPI backend hosted on Render](https://ats-api-bywt.onrender.com/docs)  
+- ** Live Demo** – https://ats-frontend-delta.vercel.app 
+- ** API Docs** – https://ats-match-ml-powered-resume-job-production.up.railway.app/docs 
 - ** Video Demo** – Complete walkthrough of features and deployment  
 
 ---
