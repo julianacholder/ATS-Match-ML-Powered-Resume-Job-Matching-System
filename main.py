@@ -89,10 +89,11 @@ async def api_overview():
 @app.get("/status")
 async def status():
     return {
-        "status": "ready" if model and vectorizer else "not_ready",
+          "status": "ready" if model and vectorizer else "not_ready",
         "last_retrained": MODEL_INFO["last_retrained"],
         "performance": MODEL_INFO["performance"],
-        "data_size": MODEL_INFO["data_size"]
+        "data_size": MODEL_INFO["data_size"],
+        "metrics": MODEL_INFO.get("metrics", {})
     }
 
 @app.post("/api/predict")
@@ -198,17 +199,25 @@ def retrain_model_task():
             callbacks=callbacks
         )
         
-        # Evaluate model and update metrics
+         # Evaluate model and update metrics
         eval_metrics = model.evaluate(X_test, y_test)
+        loss = eval_metrics[0]
         accuracy = eval_metrics[1]
         
-        # Predict on test set for F1 score calculation
+        # Predict on test set for additional metrics
         y_pred = (model.predict(X_test) > 0.5).astype("int32")
-        from sklearn.metrics import f1_score
+        from sklearn.metrics import f1_score, recall_score
         f1 = f1_score(y_test, y_pred)
-        
+        recall = recall_score(y_test, y_pred)
+
         MODEL_INFO["performance"] = f"Accuracy {accuracy:.1%}, F1 Score {f1:.2f}"
         MODEL_INFO["last_retrained"] = datetime.now().isoformat()
+        MODEL_INFO["metrics"] = {
+            "loss": float(loss),
+            "recall": float(recall),
+            "accuracy": float(accuracy),
+            "f1": float(f1)
+        }
         
         # Save model and vectorizer
         save_model(model, MODEL_PATH)
@@ -220,7 +229,9 @@ def retrain_model_task():
     finally:
         retraining_in_progress = False
 
-# Add this function to get data size on startup
+
+# Add this to the initialize_model_info() function in your FastAPI app (paste.txt)
+
 def initialize_model_info():
     global MODEL_INFO
     try:
@@ -232,11 +243,25 @@ def initialize_model_info():
         conn.close()
         
         MODEL_INFO["data_size"] = f"{count:,} samples"
+        
+        # Initialize metrics to ensure they're always available
+        if "metrics" not in MODEL_INFO:
+            MODEL_INFO["metrics"] = {
+                "loss": 0.0,
+                "accuracy": 0.0,
+                "f1": 0.0,
+                "recall": 0.0
+            }
     except Exception as e:
         print(f"Error getting initial data size: {e}")
-
-# Call this during startup
-initialize_model_info()
+        # Still initialize metrics even if database access fails
+        if "metrics" not in MODEL_INFO:
+            MODEL_INFO["metrics"] = {
+                "loss": 0.0,
+                "accuracy": 0.0,
+                "f1": 0.0,
+                "recall": 0.0
+            }
 
 @app.post("/api/retrain")
 async def retrain():
