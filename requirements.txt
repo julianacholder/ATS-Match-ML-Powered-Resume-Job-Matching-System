@@ -11,3 +11,5 @@ PyPDF2==3.0.1
 pdfminer.six==20221105
 imbalanced-learn==0.10.1
 tensorflow==2.16.1
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9

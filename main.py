@@ -9,11 +9,108 @@ from tensorflow.keras.models import load_model
 import threading
 import shutil
 from datetime import datetime
-import sqlite3
 from collections import defaultdict
-from src.preprocessing import preprocess_data, vectorize_data, save_to_database, handle_class_imbalance, split_and_save_data, parse_resume, load_from_database
+# Add SQLAlchemy imports
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+# Import prediction functions
+from src.preprocessing import preprocess_data, vectorize_data, handle_class_imbalance, split_and_save_data, parse_resume
 from src.model import evaluate_model, save_model
 from src.prediction import predict_single, analyze_skills
+
+# Database setup
+DATABASE_URL = os.environ.get('DATABASE_URL', 'fallback-connection-string-for-development')
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Database models
+class ResumeJobMatch(Base):
+    __tablename__ = "resume_job_matches"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    career_objective = Column(Text, nullable=True)
+    skills = Column(Text, nullable=True)
+    degree_names = Column(Text, nullable=True)
+    positions = Column(Text, nullable=True)
+    job_position_name = Column(String(255), nullable=True)
+    job_description = Column(Text, nullable=True)
+    match = Column(Integer, nullable=False)
+
+class ModelInfo(Base):
+    __tablename__ = "model_info"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    last_retrained = Column(String(50), nullable=False)
+    performance = Column(String(255), nullable=False)
+    data_size = Column(String(50), nullable=False)
+    loss = Column(Float, nullable=True)
+    accuracy = Column(Float, nullable=True)
+    f1 = Column(Float, nullable=True)
+    recall = Column(Float, nullable=True)
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+# Database functions
+def save_to_database(df, db_path=None):
+    """Save DataFrame to PostgreSQL database"""
+    session = SessionLocal()
+    
+    try:
+        for _, row in df.iterrows():
+            db_item = ResumeJobMatch(
+                career_objective=str(row.get('career_objective', '')),
+                skills=str(row.get('skills', '')),
+                degree_names=str(row.get('degree_names', '')),
+                positions=str(row.get('positions', '')),
+                job_position_name=str(row.get('job_position_name', '')),
+                job_description=str(row.get('job_description', '')),
+                match=int(row.get('match', 0))
+            )
+            session.add(db_item)
+        
+        session.commit()
+        return True
+    except Exception as e:
+        session.rollback()
+        print(f"Database error: {e}")
+        raise e
+    finally:
+        session.close()
+
+def load_from_database(db_path=None):
+    """Load data from PostgreSQL database into DataFrame"""
+    import pandas as pd
+    
+    session = SessionLocal()
+    
+    try:
+        # Query all records
+        items = session.query(ResumeJobMatch).all()
+        
+        # Convert to DataFrame
+        data = []
+        for item in items:
+            data.append({
+                'career_objective': item.career_objective,
+                'skills': item.skills,
+                'degree_names': item.degree_names,
+                'positions': item.positions,
+                'job_position_name': item.job_position_name,
+                'job_description': item.job_description,
+                'match': item.match
+            })
+        
+        return pd.DataFrame(data)
+    except Exception as e:
+        print(f"Error loading from database: {e}")
+        # Return empty DataFrame in case of error
+        return pd.DataFrame()
+    finally:
+        session.close()
 
 app = FastAPI(
     title="ATS Match API",
@@ -37,10 +134,9 @@ app.add_middleware(
 UPLOAD_FOLDER = 'uploads'
 MODEL_PATH = 'models/best_optimized_model.keras'
 VECTORIZER_PATH = 'models/tfidf_vectorizer.pkl'
-DATABASE_PATH = 'database/ats_database.db'
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs('models', exist_ok=True)
+os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 os.makedirs('data', exist_ok=True)
 
 # Global variables
@@ -70,6 +166,7 @@ Looking for a Machine Learning Engineer with:
 - API development skills
 Competitive salary offered.
 """
+
 @app.get("/", include_in_schema=False)
 async def api_overview():
     """Returns overview of all API endpoints"""
@@ -89,7 +186,7 @@ async def api_overview():
 @app.get("/status")
 async def status():
     return {
-          "status": "ready" if model and vectorizer else "not_ready",
+        "status": "ready" if model and vectorizer else "not_ready",
         "last_retrained": MODEL_INFO["last_retrained"],
         "performance": MODEL_INFO["performance"],
         "data_size": MODEL_INFO["data_size"],
@@ -160,19 +257,82 @@ async def upload_csv(file: UploadFile = File(...)):
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     df = pd.read_csv(filepath)
-    save_to_database(df, DATABASE_PATH)
+    save_to_database(df)
     return {"filename": file.filename, "rows": len(df)}
 
 @app.get("/api/retrain_status")
 async def retrain_status():
-    return {"retraining": retraining_in_progress}
+    stage = "preprocessing"
+    if hasattr(retrain_model_task, 'current_stage'):
+        stage = retrain_model_task.current_stage
+    return {"retraining": retraining_in_progress, "stage": stage}
+
+def initialize_model_info():
+    global MODEL_INFO
+    
+    session = SessionLocal()
+    try:
+        # Check if model info exists in database
+        model_info = session.query(ModelInfo).first()
+        
+        if model_info:
+            # Load from database
+            MODEL_INFO = {
+                "last_retrained": model_info.last_retrained,
+                "performance": model_info.performance,
+                "data_size": model_info.data_size,
+                "metrics": {
+                    "loss": model_info.loss or 0.0,
+                    "accuracy": model_info.accuracy or 0.0,
+                    "f1": model_info.f1 or 0.0,
+                    "recall": model_info.recall or 0.0
+                }
+            }
+        else:
+            # Initialize with defaults and save to database
+            MODEL_INFO = {
+                "last_retrained": datetime.now().isoformat(),
+                "performance": "Accuracy 82%, F1 Score 0.81",
+                "data_size": "8000 samples",
+                "metrics": {
+                    "loss": 0.4326,
+                    "accuracy": 0.82,
+                    "f1": 0.81,
+                    "recall": 0.8132
+                }
+            }
+            
+            # Count samples in database
+            count = session.query(ResumeJobMatch).count()
+            if count > 0:
+                MODEL_INFO["data_size"] = f"{count:,} samples"
+            
+            # Save to database
+            new_info = ModelInfo(
+                last_retrained=MODEL_INFO["last_retrained"],
+                performance=MODEL_INFO["performance"],
+                data_size=MODEL_INFO["data_size"],
+                loss=MODEL_INFO["metrics"]["loss"],
+                accuracy=MODEL_INFO["metrics"]["accuracy"],
+                f1=MODEL_INFO["metrics"]["f1"],
+                recall=MODEL_INFO["metrics"]["recall"]
+            )
+            session.add(new_info)
+            session.commit()
+            
+    except Exception as e:
+        print(f"Error initializing model info: {e}")
+    finally:
+        session.close()
 
 def retrain_model_task():
     global model, vectorizer, retraining_in_progress, MODEL_INFO
     retraining_in_progress = True
+    retrain_model_task.current_stage = "preprocessing"
+    
     try:
         # Load data from database
-        df = load_from_database(db_path=DATABASE_PATH)
+        df = load_from_database()
         
         # Check if we have enough data
         if len(df) < 10:  # Set a minimum threshold
@@ -200,6 +360,9 @@ def retrain_model_task():
         # Split data
         from sklearn.model_selection import train_test_split
         X_train, X_test, y_train, y_test = train_test_split(X_balanced, y_balanced, test_size=0.2, random_state=42)
+        
+        # Update stage
+        retrain_model_task.current_stage = "training"
         
         # Get input shape for new model
         input_shape = X_train.shape[1]
@@ -236,6 +399,9 @@ def retrain_model_task():
             callbacks=callbacks
         )
         
+        # Update stage
+        retrain_model_task.current_stage = "evaluation"
+        
         # Evaluate the new model
         eval_metrics = new_model.evaluate(X_test, y_test)
         loss = eval_metrics[0]
@@ -257,6 +423,31 @@ def retrain_model_task():
             "f1": float(f1)
         }
         
+        # Save model info to database
+        session = SessionLocal()
+        try:
+            # Get existing record or create new
+            model_info = session.query(ModelInfo).first()
+            if not model_info:
+                model_info = ModelInfo()
+                
+            # Update fields
+            model_info.last_retrained = MODEL_INFO["last_retrained"]
+            model_info.performance = MODEL_INFO["performance"]
+            model_info.data_size = MODEL_INFO["data_size"]
+            model_info.loss = MODEL_INFO["metrics"]["loss"]
+            model_info.accuracy = MODEL_INFO["metrics"]["accuracy"]
+            model_info.f1 = MODEL_INFO["metrics"]["f1"]
+            model_info.recall = MODEL_INFO["metrics"]["recall"]
+            
+            session.add(model_info)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"Error saving model info: {e}")
+        finally:
+            session.close()
+        
         # Replace the old model and vectorizer with the new ones
         model = new_model
         vectorizer = new_vectorizer
@@ -274,38 +465,6 @@ def retrain_model_task():
     finally:
         retraining_in_progress = False
 
-
-def initialize_model_info():
-    global MODEL_INFO
-    try:
-        # Try to get dataset size from database
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM resume_job_matches")
-        count = cursor.fetchone()[0]
-        conn.close()
-        
-        MODEL_INFO["data_size"] = f"{count:,} samples"
-        
-        # Initialize metrics to ensure they're always available
-        if "metrics" not in MODEL_INFO:
-            MODEL_INFO["metrics"] = {
-                "loss": 0.0,
-                "accuracy": 0.0,
-                "f1": 0.0,
-                "recall": 0.0
-            }
-    except Exception as e:
-        print(f"Error getting initial data size: {e}")
-        # Still initialize metrics even if database access fails
-        if "metrics" not in MODEL_INFO:
-            MODEL_INFO["metrics"] = {
-                "loss": 0.0,
-                "accuracy": 0.0,
-                "f1": 0.0,
-                "recall": 0.0
-            }
-
 @app.post("/api/retrain")
 async def retrain():
     global retraining_in_progress
@@ -316,5 +475,30 @@ async def retrain():
     thread.start()
     return {"message": "Retraining started from database"}
 
-# To run: uvicorn main:app --reload
+# Initialize on startup
+initialize_model_info()
 
+# Add a debug endpoint
+@app.get("/debug")
+async def debug_info():
+    """Returns debug information about the API state"""
+    return {
+        "model_info": MODEL_INFO,
+        "paths": {
+            "upload_folder": os.path.abspath(UPLOAD_FOLDER),
+            "model_path": os.path.abspath(MODEL_PATH),
+        },
+        "exists": {
+            "model": os.path.exists(MODEL_PATH),
+            "vectorizer": os.path.exists(VECTORIZER_PATH),
+        },
+        "database": {
+            "url": DATABASE_URL.replace(DATABASE_URL.split("@")[0], "postgresql://****:****"),
+            "resume_count": SessionLocal().query(ResumeJobMatch).count(),
+            "model_info_exists": SessionLocal().query(ModelInfo).first() is not None
+        },
+        "environment": {k: v for k, v in os.environ.items() if "key" not in k.lower() and "secret" not in k.lower() and "password" not in k.lower()},
+        "working_dir": os.getcwd(),
+    }
+
+# To run: uvicorn main:app --reload
