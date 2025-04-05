@@ -91,9 +91,10 @@ def preprocess_data(df):
     df_processed['combined'] = df_processed['resume_text'] + " [SEP] " + df_processed['job_text']
     
     # Create the binary label (relevant if matched_score >= 0.7)
-    # Handle case where matched_score might be renamed to 'match'
     if 'matched_score' in df_processed.columns:
-        df_processed['job_match'] = (df_processed['matched_score'].astype(float) >= 0.7).astype(int)
+        # Handle empty strings before converting to float
+        df_processed['matched_score'] = df_processed['matched_score'].replace('', np.nan)
+        df_processed['job_match'] = (df_processed['matched_score'].fillna(0).astype(float) >= 0.7).astype(int)
     elif 'match' in df_processed.columns:
         df_processed['job_match'] = df_processed['match'].astype(int)
     else:
