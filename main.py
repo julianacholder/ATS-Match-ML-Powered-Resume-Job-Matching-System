@@ -24,6 +24,9 @@ from src.prediction import predict_single, analyze_skills
 from dotenv import load_dotenv
 load_dotenv()
 
+
+tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
+
 # Database setup
 DATABASE_URL = os.environ.get('DATABASE_URL', 'fallback-connection-string-for-development')
 engine = create_engine(DATABASE_URL)
@@ -382,9 +385,9 @@ def retrain_model_task():
         
         # Create a new model with the current input shape
         new_model = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, activation='relu', input_shape=(input_shape,)),
+            tf.keras.layers.Dense(32, activation='relu', input_shape=(input_shape,)),
             tf.keras.layers.Dropout(0.3),
-            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(16, activation='relu'),
             tf.keras.layers.Dropout(0.3),
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
