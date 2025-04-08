@@ -14,11 +14,15 @@ from collections import defaultdict
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+import psutil
 
 # Import prediction functions
 from src.preprocessing import preprocess_data, vectorize_data, handle_class_imbalance, split_and_save_data, parse_resume
 from src.model import evaluate_model, save_model
 from src.prediction import predict_single, analyze_skills
+
+from dotenv import load_dotenv
+load_dotenv()
 
 # Database setup
 DATABASE_URL = os.environ.get('DATABASE_URL', 'fallback-connection-string-for-development')
@@ -166,6 +170,14 @@ Looking for a Machine Learning Engineer with:
 - API development skills
 Competitive salary offered.
 """
+
+@app.get("/memory_status")
+def memory_status():
+    mem = psutil.virtual_memory()
+    return {
+        "used_mb": mem.used / (1024 ** 2),
+        "available_mb": mem.available / (1024 ** 2),
+    }
 
 @app.get("/", include_in_schema=False)
 async def api_overview():

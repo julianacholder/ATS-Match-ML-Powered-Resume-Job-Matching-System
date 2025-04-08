@@ -90,11 +90,13 @@ def preprocess_data(df):
     # Combine the resume and job texts for classification
     df_processed['combined'] = df_processed['resume_text'] + " [SEP] " + df_processed['job_text']
     
-    # Create the binary label (relevant if matched_score >= 0.7)
+    # Create the binary label with more flexible matching
     if 'matched_score' in df_processed.columns:
         # Handle empty strings before converting to float
         df_processed['matched_score'] = df_processed['matched_score'].replace('', np.nan)
-        df_processed['job_match'] = (df_processed['matched_score'].fillna(0).astype(float) >= 0.7).astype(int)
+        
+        # Lower threshold to 0.3 to capture more potential matches
+        df_processed['job_match'] = (df_processed['matched_score'].fillna(0).astype(float) >= 0.3).astype(int)
     elif 'match' in df_processed.columns:
         df_processed['job_match'] = df_processed['match'].astype(int)
     else:
@@ -102,7 +104,63 @@ def preprocess_data(df):
         print("No match column found. Setting all matches to 1.")
         df_processed['job_match'] = 1
     
+    # Data Augmentation to ensure class balance
+    df_processed = augment_data(df_processed)
+    df_processed = generate_synthetic_matches(df_processed)
+    
+    # Verify class distribution
+    class_counts = df_processed['job_match'].value_counts()
+    print("Class distribution after preprocessing:", class_counts)
+    
+    # Ensure at least 10% positive samples
+    if len(class_counts) < 2 or class_counts[1] < len(df_processed) * 0.1:
+        print("Warning: Insufficient positive samples after augmentation")
+    
     return df_processed
+
+def augment_data(df):
+    """
+    Manually augment data to create more positive matches
+    """
+    # Manually create some positive matches
+    pos_samples = df.copy()
+    
+    # Modify some features to create positive matches
+    pos_samples['job_match'] = 1
+    pos_samples['matched_score'] = pos_samples['matched_score'].apply(lambda x: max(x, 0.7))
+    
+    # Combine original and augmented data
+    augmented_df = pd.concat([df, pos_samples], ignore_index=True)
+    
+    return augmented_df
+
+def generate_synthetic_matches(df):
+    """
+    Generate synthetic positive samples to balance the dataset
+    """
+    import numpy as np
+    
+    # Identify features for synthetic data
+    feature_columns = ['skills', 'positions', 'degree_names', 'responsibilities']
+    
+    # Generate synthetic positive samples
+    synthetic_positives = []
+    for _ in range(len(df) // 2):  # Generate about half as many synthetic samples
+        # Randomly sample and modify existing rows
+        sample = df.sample(n=2)
+        synthetic_row = sample.iloc[0].copy()
+        
+        # Mix features from both samples
+        for col in feature_columns:
+            synthetic_row[col] = sample.iloc[1][col]
+        
+        synthetic_row['job_match'] = 1
+        synthetic_row['matched_score'] = np.random.uniform(0.7, 1.0)
+        synthetic_positives.append(synthetic_row)
+    
+    # Convert to DataFrame and concat
+    synthetic_df = pd.DataFrame(synthetic_positives)
+    return pd.concat([df, synthetic_df], ignore_index=True)
 
 def vectorize_data(df, vectorizer_path=None):
     """

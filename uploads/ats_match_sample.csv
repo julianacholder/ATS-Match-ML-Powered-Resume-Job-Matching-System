@@ -1,4 +1,3 @@
-resume_id,career_objective,skills,degree_names,positions,job_position_name,job_description,match
-1,"Seeking a challenging role in software development","Python, JavaScript, React, TensorFlow, Machine Learning","Bachelor of Computer Science","Software Developer, Junior Engineer","Machine Learning Engineer","Looking for a talented ML engineer with Python and TensorFlow experience to join our team.",1
-2,"Looking for opportunities in data science","SQL, Python, Excel, Tableau, Statistics","Master of Data Science","Data Analyst, Research Assistant","Data Scientist","We need a data scientist with strong SQL and Python skills to analyze large datasets.",1
-3,"Passionate about web development","HTML, CSS, JavaScript, Vue.js","Associate Degree in Web Development","Web Designer","Frontend Developer","Hiring frontend developers with strong Vue.js experience to build responsive web applications.",0
+version https://git-lfs.github.com/spec/v1
+oid sha256:73aa8df0856938242dccfa9cc0a5680a0ceb076c805e415c835723e82001f102
+size 901
