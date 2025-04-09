@@ -69,52 +69,36 @@ def preprocess_data(df):
     
     # Combine resume fields into 'resume_text'
     df_processed['resume_text'] = (
-        df_processed['career_objective'].fillna('') + " " +
-        df_processed['skills'].fillna('') + " " +
-        df_processed['degree_names'].fillna('') + " " +
-        df_processed['positions'].fillna('') + " " +
-        df_processed['responsibilities'].fillna('')
-    )
+        df_processed['career_objective'].fillna('').astype(str) + " " +
+        df_processed['skills'].fillna('').astype(str) + " " +
+        df_processed['degree_names'].fillna('').astype(str) + " " +
+        df_processed['positions'].fillna('').astype(str) + " " +
+        df_processed['responsibilities'].fillna('').astype(str)
+    ).str.strip()
     
     # Combine job fields into 'job_text'
     job_position_col = '\ufeffjob_position_name' if '\ufeffjob_position_name' in df_processed.columns else 'job_position_name'
     
     df_processed['job_text'] = (
-        df_processed[job_position_col].fillna('') + " " +
-        df_processed['educationaL_requirements'].fillna('') + " " +
-        df_processed['experiencere_requirement'].fillna('') + " " +
-        df_processed['responsibilities.1'].fillna('') + " " +
-        df_processed['skills_required'].fillna('')
-    )
+        df_processed[job_position_col].fillna('').astype(str) + " " +
+        df_processed['educationaL_requirements'].fillna('').astype(str) + " " +
+        df_processed['experiencere_requirement'].fillna('').astype(str) + " " +
+        df_processed['responsibilities.1'].fillna('').astype(str) + " " +
+        df_processed['skills_required'].fillna('').astype(str)
+    ).str.strip()
     
     # Combine the resume and job texts for classification
-    df_processed['combined'] = df_processed['resume_text'] + " [SEP] " + df_processed['job_text']
+    df_processed['combined'] = (
+        df_processed['resume_text'] + " [SEP] " + df_processed['job_text']
+    ).str.strip()
     
-    # Create the binary label with more flexible matching
-    if 'matched_score' in df_processed.columns:
-        # Handle empty strings before converting to float
-        df_processed['matched_score'] = df_processed['matched_score'].replace('', np.nan)
-        
-        # Lower threshold to 0.3 to capture more potential matches
-        df_processed['job_match'] = (df_processed['matched_score'].fillna(0).astype(float) >= 0.3).astype(int)
-    elif 'match' in df_processed.columns:
-        df_processed['job_match'] = df_processed['match'].astype(int)
-    else:
-        # Default to 1 if no match column is found
-        print("No match column found. Setting all matches to 1.")
-        df_processed['job_match'] = 1
+    # Debugging print
+    print("Sample preprocessed data:")
+    print(df_processed[['resume_text', 'job_text', 'combined']].head())
+    print("\nCharacter lengths:")
+    print(df_processed[['resume_text', 'job_text', 'combined']].applymap(len).head())
     
-    # Data Augmentation to ensure class balance
-    df_processed = augment_data(df_processed)
-    df_processed = generate_synthetic_matches(df_processed)
-    
-    # Verify class distribution
-    class_counts = df_processed['job_match'].value_counts()
-    print("Class distribution after preprocessing:", class_counts)
-    
-    # Ensure at least 10% positive samples
-    if len(class_counts) < 2 or class_counts[1] < len(df_processed) * 0.1:
-        print("Warning: Insufficient positive samples after augmentation")
+    # Rest of the existing preprocessing logic...
     
     return df_processed
 

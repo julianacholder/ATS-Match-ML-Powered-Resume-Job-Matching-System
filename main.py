@@ -24,9 +24,6 @@ from src.prediction import predict_single, analyze_skills
 from dotenv import load_dotenv
 load_dotenv()
 
-
-tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
-
 # Database setup
 DATABASE_URL = os.environ.get('DATABASE_URL', 'fallback-connection-string-for-development')
 engine = create_engine(DATABASE_URL)
@@ -35,16 +32,30 @@ Base = declarative_base()
 
 # Database models
 class ResumeJobMatch(Base):
-    __tablename__ = "resume_job_matches"
+    __tablename__ = 'resume_job_matches'
+
+    id = Column(Integer, primary_key=True)
     
-    id = Column(Integer, primary_key=True, index=True)
-    career_objective = Column(Text, nullable=True)
-    skills = Column(Text, nullable=True)
-    degree_names = Column(Text, nullable=True)
-    positions = Column(Text, nullable=True)
-    job_position_name = Column(String(255), nullable=True)
-    job_description = Column(Text, nullable=True)
-    match = Column(Integer, nullable=False)
+    # Original columns
+    career_objective = Column(String)
+    skills = Column(String)
+    degree_names = Column(String)
+    positions = Column(String)
+    responsibilities = Column(String)
+    
+    # Additional columns
+    job_position_name = Column(String)
+    educationaL_requirements = Column(String)
+    experiencere_requirement = Column(String)
+    responsibilities_1 = Column(String)
+    skills_required = Column(String)
+    matched_score = Column(Float)
+    
+    # Combined fields
+    resume_text = Column(String)
+    job_text = Column(String)
+    combined = Column(String)
+    job_match = Column(Integer)
 
 class ModelInfo(Base):
     __tablename__ = "model_info"
@@ -67,36 +78,77 @@ def save_to_database(df, db_path=None):
     session = SessionLocal()
     
     try:
+        # Prepare data for saving
+        records = []
         for _, row in df.iterrows():
-            db_item = ResumeJobMatch(
-                career_objective=str(row.get('career_objective', '')),
-                skills=str(row.get('skills', '')),
-                degree_names=str(row.get('degree_names', '')),
-                positions=str(row.get('positions', '')),
-                job_position_name=str(row.get('job_position_name', '')),
-                job_description=str(row.get('job_description', '')),
-                match=int(row.get('match', 0))
-            )
-            session.add(db_item)
+            record = {
+                # Ensure all string fields are converted and stripped
+                'career_objective': str(row.get('career_objective', '')).strip(),
+                'skills': str(row.get('skills', '')).strip(),
+                'degree_names': str(row.get('degree_names', '')).strip(),
+                'positions': str(row.get('positions', '')).strip(),
+                'responsibilities': str(row.get('responsibilities', '')).strip(),
+                
+                # Combined text fields with explicit conversion
+                'resume_text': str(row.get('resume_text', '')).strip(),
+                'job_text': str(row.get('job_text', '')).strip(),
+                'combined': str(row.get('combined', '')).strip(),
+                
+                # Other fields remain the same
+                'job_position_name': str(row.get('\ufeffjob_position_name', '')).strip(),
+                'educationaL_requirements': str(row.get('educationaL_requirements', '')).strip(),
+                'experiencere_requirement': str(row.get('experiencere_requirement', '')).strip(),
+                'responsibilities_1': str(row.get('responsibilities.1', '')).strip(),
+                'skills_required': str(row.get('skills_required', '')).strip(),
+                
+                'matched_score': float(row.get('matched_score', 0.0)),
+                'match': int(row.get('match', 0)),
+                'job_match': int(row.get('job_match', 0))
+            }
+            
+            records.append(record)
+        
+        # Bulk insert records
+        session.bulk_insert_mappings(ResumeJobMatch, records)
         
         session.commit()
+        print(f"Successfully saved {len(records)} records to database")
+        
+        # Debug: Print first few records' text field lengths
+        for record in records[:5]:
+            print(f"Resume Text Length: {len(record['resume_text'])}")
+            print(f"Job Text Length: {len(record['job_text'])}")
+            print(f"Combined Text Length: {len(record['combined'])}")
+        
         return True
     except Exception as e:
         session.rollback()
         print(f"Database error: {e}")
-        raise e
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
         session.close()
-
-def load_from_database(db_path=None):
-    """Load data from PostgreSQL database into DataFrame"""
-    import pandas as pd
+def load_from_database(db_path=None, limit=None):
+    """
+    Load data from PostgreSQL database into DataFrame
     
+    Args:
+        db_path: Not used, kept for compatibility
+        limit: Optional limit on number of records to load
+    
+    Returns:
+        DataFrame containing database records
+    """
     session = SessionLocal()
     
     try:
-        # Query all records
-        items = session.query(ResumeJobMatch).all()
+        # Query records with optional limit
+        query = session.query(ResumeJobMatch)
+        if limit:
+            query = query.limit(limit)
+        
+        items = query.all()
         
         # Convert to DataFrame
         data = []
@@ -106,19 +158,29 @@ def load_from_database(db_path=None):
                 'skills': item.skills,
                 'degree_names': item.degree_names,
                 'positions': item.positions,
-                'job_position_name': item.job_position_name,
-                'job_description': item.job_description,
-                'match': item.match
+                'responsibilities': item.responsibilities,
+                '\ufeffjob_position_name': item.job_position_name,
+                'educationaL_requirements': item.educationaL_requirements,
+                'experiencere_requirement': item.experiencere_requirement,
+                'responsibilities.1': item.responsibilities_1,
+                'skills_required': item.skills_required,
+                'matched_score': item.matched_score,
+                'resume_text': item.resume_text,
+                'job_text': item.job_text,
+                'combined': item.combined,
+                'job_match': item.job_match
             })
         
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        print(f"Loaded {len(df)} records from database")
+        return df
     except Exception as e:
         print(f"Error loading from database: {e}")
-        # Return empty DataFrame in case of error
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
     finally:
         session.close()
-
 app = FastAPI(
     title="ATS Match API",
     description="Machine Learning API for matching resumes to job descriptions",
@@ -379,22 +441,23 @@ def retrain_model_task():
         # Update stage
         retrain_model_task.current_stage = "training"
         
-        # Get input shape for new model
+        # Rebuild the model with new input shape
         input_shape = X_train.shape[1]
         print(f"Building new model with input shape: {input_shape}")
         
         # Create a new model with the current input shape
         new_model = tf.keras.Sequential([
-            tf.keras.layers.Dense(32, activation='relu', input_shape=(input_shape,)),
+            tf.keras.layers.Input(shape=(input_shape,)),
+            tf.keras.layers.Dense(128, activation='relu'),
             tf.keras.layers.Dropout(0.3),
-            tf.keras.layers.Dense(16, activation='relu'),
+            tf.keras.layers.Dense(64, activation='relu'),
             tf.keras.layers.Dropout(0.3),
             tf.keras.layers.Dense(1, activation='sigmoid')
         ])
         
         # Compile the new model
         new_model.compile(
-            optimizer=tf.keras.optimizers.SGD(learning_rate=0.001, momentum=0.9),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
             loss='binary_crossentropy', 
             metrics=['accuracy']
         )
@@ -438,15 +501,21 @@ def retrain_model_task():
             "f1": float(f1)
         }
         
-        # Save model info to database
+        # Replace the old model and vectorizer with the new ones
+        model = new_model
+        vectorizer = new_vectorizer
+        
+        # Save the new model and vectorizer
+        save_model(model, MODEL_PATH)
+        joblib.dump(vectorizer, VECTORIZER_PATH)
+        
+        # Save model info to database (existing code remains the same)
         session = SessionLocal()
         try:
-            # Get existing record or create new
             model_info = session.query(ModelInfo).first()
             if not model_info:
                 model_info = ModelInfo()
-                
-            # Update fields
+            
             model_info.last_retrained = MODEL_INFO["last_retrained"]
             model_info.performance = MODEL_INFO["performance"]
             model_info.data_size = MODEL_INFO["data_size"]
@@ -462,14 +531,6 @@ def retrain_model_task():
             print(f"Error saving model info: {e}")
         finally:
             session.close()
-        
-        # Replace the old model and vectorizer with the new ones
-        model = new_model
-        vectorizer = new_vectorizer
-        
-        # Save the new model and vectorizer
-        save_model(model, MODEL_PATH)
-        joblib.dump(new_vectorizer, VECTORIZER_PATH)
         
         print("Model retrained and saved successfully!")
         
