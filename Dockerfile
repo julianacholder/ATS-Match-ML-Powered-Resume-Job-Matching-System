@@ -1,16 +1,14 @@
 # Use an official lightweight Python image
 FROM python:3.11-slim
 
-# Prevent Python from writing .pyc files to disk
+# Prevent Python from writing .pyc files and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1
-
-# Prevent Python from buffering stdout/stderr
 ENV PYTHONUNBUFFERED=1
 
 # Set working directory in the container
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (required for python-docx, pandas, etc.)
 RUN apt-get update && apt-get install -y \
     build-essential \
     libglib2.0-0 \
@@ -21,7 +19,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy entire application
 COPY . .
