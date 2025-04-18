@@ -33,6 +33,9 @@ def predict_single(resume_text, job_text, model, vectorizer):
 
     skills_info = analyze_skills(resume_text, job_text)
 
+    print(model.summary())
+
+
     return prediction, probability, skills_info
 
 
