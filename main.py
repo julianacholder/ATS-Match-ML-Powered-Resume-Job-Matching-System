@@ -291,8 +291,8 @@ async def predict(
     
     prediction, probability = predict_single(resume_text, job_text, model, vectorizer)
     return {
-        'prediction': float(prediction),
-        'prediction_label': 'Relevant' if prediction >=0.7 else 'Not Relevant',
+        'prediction': int(prediction),
+        'prediction_label': 'Relevant' if prediction == 1 else 'Not Relevant',
         'probability': float(probability),
         'note': 'Using sample data if no input provided'
     }
@@ -319,7 +319,7 @@ async def predict_resume_file(resume: UploadFile = File(...), job_text: str = Fo
     
     return {
         "prediction": int(prediction),
-       "prediction_label": "Relevant" if prediction >= 0.5 else "Not Relevant",
+       "prediction_label": "Relevant" if prediction == 1 else "Not Relevant",
         "probability": float(probability),
         "matching_skills": skills_info["matching_skills"],
         "missing_skills": skills_info["missing_skills"],

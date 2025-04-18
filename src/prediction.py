@@ -29,7 +29,7 @@ def predict_single(resume_text, job_text, model, vectorizer):
     """
     features = preprocess_input(resume_text, job_text, vectorizer)
     probability = model.predict(features)[0][0]
-    prediction = 1 if probability >= 0.5 else 0
+    prediction = 1 if probability >= 0.7 else 0
 
     skills_info = analyze_skills(resume_text, job_text)
 
