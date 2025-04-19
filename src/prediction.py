@@ -11,12 +11,23 @@ from spacy.matcher import PhraseMatcher
 from skillNer.skill_extractor_class import SkillExtractor
 from skillNer.general_params import SKILL_DB
 
-# Load spaCy model
-nlp = spacy.load("en_core_web_lg")
+nlp = None
+skill_extractor = None
 
-# Create SkillExtractor instance with default skill DB
-skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
+def get_nlp():
+    global nlp
+    if nlp is None:
+        # Only load when needed
+        nlp = spacy.load("en_core_web_lg")
+    return nlp
 
+def get_skill_extractor():
+    global skill_extractor
+    if skill_extractor is None:
+        # Only create when needed
+        nlp = get_nlp()
+        skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
+    return skill_extractor
 
 def get_model_summary(model):
     stream = io.StringIO()
@@ -62,7 +73,7 @@ def predict_single(resume_text, job_text, model, vectorizer):
         prediction = 1
         reason = "Rule override: 5+ matching skills"
     else:
-        prediction = 1 if combined_score >= 0.7 else 0
+        prediction = 1 if combined_score >= 0.75 else 0
         reason = "Based on combined score and model confidence"
 
     return prediction, probability, skills_info, combined_score, reason
@@ -75,7 +86,9 @@ def extract_skills(text, min_score=0.7):
     Returns a set of unique skill strings.
     """
     try:
-        annotations = skill_extractor.annotate(text)
+        # Get the extractor only when needed
+        extractor = get_skill_extractor()
+        annotations = extractor.annotate(text)
 
         # Exact matches
         full_matches = {
