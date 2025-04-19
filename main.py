@@ -25,6 +25,7 @@ from src.prediction import predict_single, analyze_skills, get_model_summary
 from dotenv import load_dotenv
 load_dotenv()
 
+
 # Database setup
 DATABASE_URL = os.environ.get('DATABASE_URL', 'fallback-connection-string-for-development')
 engine = create_engine(DATABASE_URL)
