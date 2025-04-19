@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import joblib
 import tensorflow as tf
+import time
 from tensorflow.keras.models import load_model
 import threading
 import shutil
@@ -298,6 +299,7 @@ async def predict(
     }
 @app.post("/api/predict_resume_file")
 async def predict_resume_file(resume: UploadFile = File(...), job_text: str = Form(...)):
+    start_time = time.time()
     if not resume.filename.endswith((".pdf", ".docx", ".doc")):
         return JSONResponse(content={"error": "Unsupported file type"}, status_code=400)
 
@@ -314,7 +316,10 @@ async def predict_resume_file(resume: UploadFile = File(...), job_text: str = Fo
     # Get prediction, confidence, skill info, and combined score
     prediction, probability, skills_info, combined_score, reason = predict_single(resume_text, job_text, model, vectorizer)
 
-    model_summary = get_model_summary(model)  # Capture model summary as string
+    duration = round(time.time() - start_time, 3)
+    print(f"✅ Request processed in {duration} seconds")
+
+  
 
     return {
         "prediction": int(prediction),
@@ -324,8 +329,8 @@ async def predict_resume_file(resume: UploadFile = File(...), job_text: str = Fo
         "matching_skill_count": len(skills_info["matching_skills"]),
         "matching_skills": skills_info["matching_skills"],
         "missing_skills": skills_info["missing_skills"],
-        "resume_excerpt": resume_text[:500],
-        "model_summary": model_summary,
+        "resume_excerpt": resume_text[:300],
+        "request_duration": duration,
         "decision_reason": reason 
     }
 

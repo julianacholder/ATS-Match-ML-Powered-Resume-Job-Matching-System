@@ -12,7 +12,8 @@ from skillNer.skill_extractor_class import SkillExtractor
 from skillNer.general_params import SKILL_DB
 
 # Load spaCy model
-nlp = spacy.load("en_core_web_lg")
+nlp = spacy.load("en_core_web_md")  # ~50% smaller, still accurate
+
 
 # Create SkillExtractor instance with default skill DB
 skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
