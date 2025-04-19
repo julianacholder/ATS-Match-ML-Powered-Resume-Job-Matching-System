@@ -2,6 +2,27 @@ import numpy as np
 import pandas as pd
 import joblib
 from tensorflow.keras.models import load_model
+import io
+from contextlib import redirect_stdout
+import re
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+import spacy
+from spacy.matcher import PhraseMatcher
+from skillNer.skill_extractor_class import SkillExtractor
+from skillNer.general_params import SKILL_DB
+
+# Load spaCy model
+nlp = spacy.load("en_core_web_lg")
+
+# Create SkillExtractor instance with default skill DB
+skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
+
+
+def get_model_summary(model):
+    stream = io.StringIO()
+    with redirect_stdout(stream):
+        model.summary()
+    return stream.getvalue()
 
 def preprocess_input(resume_text, job_text, vectorizer):
     """
@@ -25,33 +46,69 @@ def preprocess_input(resume_text, job_text, vectorizer):
 
 def predict_single(resume_text, job_text, model, vectorizer):
     """
-    Make a prediction for a single resume-job pair, with skill analysis
+    Make a prediction for a single resume-job pair, combining model confidence and skill overlap.
     """
     features = preprocess_input(resume_text, job_text, vectorizer)
     probability = model.predict(features)[0][0]
-    prediction = 1 if probability >= 0.7 else 0
 
     skills_info = analyze_skills(resume_text, job_text)
+    matching_skills = skills_info["matching_skills"]
 
-    print(model.summary())
+    # Compute combined score (optional)
+    combined_score = (probability * 0.7) + (min(len(matching_skills), 5) / 10 * 0.3)
+
+    # RULE OVERRIDE: If at least 5 matching skills, force it to Relevant
+    if len(matching_skills) >= 5:
+        prediction = 1
+        reason = "Rule override: 5+ matching skills"
+    else:
+        prediction = 1 if combined_score >= 0.7 else 0
+        reason = "Based on combined score and model confidence"
+
+    return prediction, probability, skills_info, combined_score, reason
 
 
-    return prediction, probability, skills_info
+
+def extract_skills(text, min_score=0.7):
+    """
+    Extracts skills using both full matches and fuzzy matches.
+    Returns a set of unique skill strings.
+    """
+    try:
+        annotations = skill_extractor.annotate(text)
+
+        # Exact matches
+        full_matches = {
+            skill['doc_node_value'].lower()
+            for skill in annotations['results']['full_matches']
+        }
+
+        # Fuzzy matches above threshold
+        fuzzy_matches = {
+            skill['doc_node_value'].lower()
+            for skill in annotations['results']['ngram_scored']
+            if skill['score'] >= min_score
+        }
+
+        # Combine both sets
+        return full_matches.union(fuzzy_matches)
+
+    except Exception as e:
+        print(f"Skill extraction error: {e}")
+        return set()
 
 
-def extract_skills(text):
-    return set(word.lower() for word in text.split() if len(word) > 2)
 
 def analyze_skills(resume_text, job_text):
     resume_skills = extract_skills(resume_text)
     job_skills = extract_skills(job_text)
 
-    matching = list(resume_skills.intersection(job_skills))
-    missing = list(job_skills - resume_skills)
+    matching_skills = sorted(resume_skills & job_skills)
+    missing_skills = sorted(job_skills - resume_skills)
 
     return {
-        "matching_skills": matching,
-        "missing_skills": missing
+        "matching_skills": matching_skills,
+        "missing_skills": missing_skills,
     }
 
 

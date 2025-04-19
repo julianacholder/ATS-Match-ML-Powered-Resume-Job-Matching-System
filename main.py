@@ -19,7 +19,7 @@ import psutil
 # Import prediction functions
 from src.preprocessing import preprocess_data, vectorize_data, handle_class_imbalance, split_and_save_data, parse_resume
 from src.model import evaluate_model, save_model
-from src.prediction import predict_single, analyze_skills
+from src.prediction import predict_single, analyze_skills, get_model_summary
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -289,42 +289,47 @@ async def predict(
     if not resume_text or not job_text:
         return JSONResponse(content={'error': 'Missing input text'}, status_code=400)
     
-    prediction, probability = predict_single(resume_text, job_text, model, vectorizer)
+    prediction, probability, _ = predict_single(resume_text, job_text, model, vectorizer)
     return {
         'prediction': int(prediction),
         'prediction_label': 'Relevant' if prediction == 1 else 'Not Relevant',
         'probability': float(probability),
         'note': 'Using sample data if no input provided'
     }
-
 @app.post("/api/predict_resume_file")
 async def predict_resume_file(resume: UploadFile = File(...), job_text: str = Form(...)):
     if not resume.filename.endswith((".pdf", ".docx", ".doc")):
         return JSONResponse(content={"error": "Unsupported file type"}, status_code=400)
 
-    # Save the uploaded file temporarily
     temp_path = os.path.join(UPLOAD_FOLDER, resume.filename)
     with open(temp_path, "wb") as f:
         content = await resume.read()
         f.write(content)
 
-    # Parse resume into plain text
     try:
         resume_text = parse_resume(temp_path)
     except Exception as e:
         return JSONResponse(content={"error": f"Resume parsing failed: {str(e)}"}, status_code=500)
 
-    # Predict
-    prediction, probability, skills_info = predict_single(resume_text, job_text, model, vectorizer)
-    
+    # Get prediction, confidence, skill info, and combined score
+    prediction, probability, skills_info, combined_score, reason = predict_single(resume_text, job_text, model, vectorizer)
+
+    model_summary = get_model_summary(model)  # Capture model summary as string
+
     return {
         "prediction": int(prediction),
-       "prediction_label": "Relevant" if prediction == 1 else "Not Relevant",
+        "prediction_label": "Relevant" if prediction == 1 else "Not Relevant",
         "probability": float(probability),
+        "combined_score": round(combined_score, 3),
+        "matching_skill_count": len(skills_info["matching_skills"]),
         "matching_skills": skills_info["matching_skills"],
         "missing_skills": skills_info["missing_skills"],
-        "resume_excerpt": resume_text[:300]
+        "resume_excerpt": resume_text[:500],
+        "model_summary": model_summary,
+        "decision_reason": reason 
     }
+
+
 
 @app.post("/api/upload")
 async def upload_csv(file: UploadFile = File(...)):
