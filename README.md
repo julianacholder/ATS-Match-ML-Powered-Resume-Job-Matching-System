@@ -185,5 +185,5 @@ This project is licensed under the **MIT License** – see the `LICENSE` file fo
 
 ##  Contact
 
-**Your Name** – [j.holder@alustudent.com](j.holder@alustudent.com)  
+**Juliana Crystal Holder** – [j.holder@alustudent.com](j.holder@alustudent.com)  
 GitHub Repo: [github.com/julianacholder/ATS-Match-ML-Powered-Resume-Job-Matching-System](https://github.com/julianacholder/ATS-Match-ML-Powered-Resume-Job-Matching-System)
